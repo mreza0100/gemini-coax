@@ -1,0 +1,77 @@
+[project]
+name = "gemini-coax"
+version = "0.1.0"
+description = "Make Google Gemini structured output actually validate against your Pydantic models — fixes the anyOf/enum drop, ignored numeric & length bounds, and degraded array tails."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "mreza0100" }]
+keywords = [
+    "gemini",
+    "google-gemini",
+    "structured-output",
+    "pydantic",
+    "json-schema",
+    "langchain",
+    "langchain-google-genai",
+    "vertex-ai",
+    "llm",
+    "anyof",
+    "constrained-decoding",
+    "validation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+langchain = [
+    "langchain-google-genai>=4.2,<5",
+    "langchain-core>=0.3",
+    "tenacity>=9.0",
+]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+]
+
+[project.urls]
+Homepage = "https://github.com/mreza0100/gemini-coax"
+Repository = "https://github.com/mreza0100/gemini-coax"
+Issues = "https://github.com/mreza0100/gemini-coax/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gemini_coax"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
