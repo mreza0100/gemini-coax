@@ -155,9 +155,8 @@ def repair_enums(
     non_enum_errors = [e for e in errors if not _is_enum_error(e)]
     if non_enum_errors:
         log.debug(
-            "enum_repair_skip_mixed_errors enum=%d non_enum=%d",
-            len(enum_errors),
-            len(non_enum_errors),
+            f"enum_repair_skip_mixed_errors enum={len(enum_errors)} "
+            f"non_enum={len(non_enum_errors)}"
         )
         return None
 
@@ -197,19 +196,16 @@ def repair_enums(
             continue
 
         log.debug(
-            "enum_repair_fuzzy_match field=%s original=%s repaired=%s",
-            ".".join(str(p) for p in loc),
-            raw_value,
-            repaired_value,
+            f"enum_repair_fuzzy_match field={'.'.join(str(p) for p in loc)} "
+            f"original={raw_value} repaired={repaired_value}"
         )
         _patch_nested_dict(patched, loc, repaired_value)
         repaired_count += 1
 
     if failed_repairs:
         log.warning(
-            "enum_repair_partial_failure repaired=%d failed=%d",
-            repaired_count,
-            len(failed_repairs),
+            f"enum_repair_partial_failure repaired={repaired_count} "
+            f"failed={len(failed_repairs)}"
         )
         return None
 
@@ -217,13 +213,12 @@ def repair_enums(
         result = model.model_validate(patched)
     except ValidationError as exc:
         log.warning(
-            "enum_repair_revalidation_failed repaired=%d error=%s",
-            repaired_count,
-            str(exc)[:300],
+            f"enum_repair_revalidation_failed repaired={repaired_count} "
+            f"error={str(exc)[:300]}"
         )
         return None
 
-    log.info("enum_repair_success repaired=%d", repaired_count)
+    log.info(f"enum_repair_success repaired={repaired_count}")
     return result
 
 
@@ -280,11 +275,11 @@ def salvage_list(
     for item in raw_list:
         try:
             valid.append(item_model.model_validate(item))
-        except ValidationError:
+        except Exception:  # noqa: BLE001 - drop any entry that fails for any reason
             dropped += 1
 
     if not valid:
-        log.warning("salvage_list_all_dropped field=%s total=%d", list_field, len(raw_list))
+        log.warning(f"salvage_list_all_dropped field={list_field} total={len(raw_list)}")
         return None
 
     if dropped == 0:
@@ -297,19 +292,14 @@ def salvage_list(
         result = model.model_validate(patched)
     except ValidationError as exc:
         log.warning(
-            "salvage_list_revalidation_failed field=%s valid=%d error=%s",
-            list_field,
-            len(valid),
-            str(exc)[:300],
+            f"salvage_list_revalidation_failed field={list_field} "
+            f"valid={len(valid)} error={str(exc)[:300]}"
         )
         return None
 
     log.info(
-        "salvage_list_success field=%s salvaged=%d dropped=%d total=%d",
-        list_field,
-        len(valid),
-        dropped,
-        len(raw_list),
+        f"salvage_list_success field={list_field} salvaged={len(valid)} "
+        f"dropped={dropped} total={len(raw_list)}"
     )
     return result
 
