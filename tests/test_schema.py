@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytest
 from pydantic import BaseModel, Field
 
 from gemini_coax import (
@@ -65,6 +66,31 @@ def test_clamp_recurses_into_list_of_models() -> None:
 def test_fill_missing_nullables() -> None:
     out = fill_missing_nullables({"severity": 3, "note": "ok"}, Finding)
     assert out["label"] is None
+
+
+def test_unknown_top_level_attr_raises_attribute_error() -> None:
+    import gemini_coax
+
+    with pytest.raises(AttributeError):
+        _ = gemini_coax.does_not_exist
+
+
+def test_geminisafe_lazy_export() -> None:
+    """`from gemini_coax import GeminiSafe` resolves the adapter lazily.
+
+    When the [langchain] extra is installed it returns the class; when absent it
+    raises the adapter's helpful ImportError. Either outcome proves the lazy
+    PEP 562 path fires (a plain AttributeError would mean it never tried).
+    """
+    import gemini_coax
+
+    try:
+        from gemini_coax.langchain import GeminiSafe as Direct
+    except ImportError:
+        with pytest.raises(ImportError):
+            _ = gemini_coax.GeminiSafe
+    else:
+        assert gemini_coax.GeminiSafe is Direct
 
 
 def test_coax_end_to_end_repairs_and_validates() -> None:

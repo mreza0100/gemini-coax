@@ -37,6 +37,23 @@ __all__ = [
 ]
 
 
+def __getattr__(name: str) -> Any:
+    """Lazily expose the optional LangChain adapter at the top level.
+
+    ``from gemini_coax import GeminiSafe`` works without forcing the core import
+    to depend on ``langchain`` — the adapter (and its ``langchain`` requirement)
+    is only imported the moment ``GeminiSafe`` is actually accessed. With the
+    ``[langchain]`` extra absent, that access raises the adapter's helpful
+    ImportError; plain ``import gemini_coax`` stays clean either way.
+    """
+    if name == "GeminiSafe":
+        from .langchain import GeminiSafe
+
+        return GeminiSafe
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
+
 def coax(raw: dict[str, Any], model: type[BaseModel]) -> BaseModel:
     """Coax a raw Gemini dict into a validated model instance.
 
