@@ -106,6 +106,30 @@ Two layers, so the value isn't hostage to any framework's release notes:
 - **Adapter** (`gemini_coax.langchain.GeminiSafe`) — the LangChain drop-in.
   Pulled in only by the `[langchain]` extra; pins `langchain-google-genai>=4.2,<5`.
 
+## Releasing
+
+Releases publish to PyPI **automatically** via
+[`.github/workflows/release.yml`](./.github/workflows/release.yml), triggered on any
+`v*` tag push — no API token, using PyPI
+[Trusted Publishing](https://docs.pypi.org/trusted-publishers/) over OIDC.
+
+To cut a release:
+
+1. Bump the version in **both** `pyproject.toml` (`version`) and
+   `src/gemini_coax/__init__.py` (`__version__`) — they must match.
+2. Commit, then tag and push:
+   ```bash
+   git tag v0.2.0 && git push origin v0.2.0
+   ```
+3. The workflow verifies the tag equals the package version, runs ruff + the test
+   suite, builds the wheel + sdist, and publishes to PyPI. A mismatched tag (e.g.
+   `v0.2.0` while `pyproject` says `0.1.0`) fails **before** any upload.
+
+One-time setup (already done for this repo): a PyPI
+[pending publisher](https://pypi.org/manage/account/publishing/) — project
+`gemini-coax`, owner `mreza0100`, repo `gemini-coax`, workflow `release.yml`,
+environment `pypi` — plus a GitHub environment named `pypi`.
+
 ## License
 
 MIT
