@@ -16,12 +16,21 @@ Two layers:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ValidationError
 
 from .repair import repair_enums, salvage_list, salvage_lists
 from .schema import clamp_to_constraints, fill_missing_nullables, strip_nullable_anyof
+
+if TYPE_CHECKING:
+    # Static binding for type checkers: at runtime ``GeminiSafe`` is supplied
+    # lazily by ``__getattr__`` below (so the core import stays free of
+    # langchain), but mypy/pyright cannot follow a runtime ``__getattr__`` and
+    # would type ``from gemini_coax import GeminiSafe`` as ``Any``. This
+    # re-export (``as GeminiSafe``) gives them the concrete class without
+    # importing langchain at runtime.
+    from .langchain import GeminiSafe as GeminiSafe
 
 __version__ = "0.1.0"
 
