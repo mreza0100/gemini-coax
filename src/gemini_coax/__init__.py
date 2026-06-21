@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     # importing langchain at runtime.
     from .langchain import GeminiSafe as GeminiSafe
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "coax",

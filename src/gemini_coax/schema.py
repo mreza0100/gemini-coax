@@ -16,6 +16,7 @@ LangChain, no provider SDK. They are the framework-free core of ``gemini-coax``.
 from __future__ import annotations
 
 import copy
+import types
 from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
@@ -102,7 +103,7 @@ def strip_nullable_anyof(schema: dict[str, Any]) -> dict[str, Any]:
 def _resolve_inner_type(annotation: Any) -> Any:
     """Unwrap ``Optional[X]`` / ``X | None`` to ``X``."""
     origin = get_origin(annotation)
-    if origin is Union:
+    if origin is Union or origin is types.UnionType:
         args = [a for a in get_args(annotation) if a is not type(None)]
         if len(args) == 1:
             return args[0]

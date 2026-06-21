@@ -104,3 +104,34 @@ def test_coax_end_to_end_repairs_and_validates() -> None:
     assert isinstance(report, Report)
     assert report.findings[0].severity == 5
     assert report.findings[1].label is None
+
+
+class Box(BaseModel):
+    label: str
+    note: str | None  # required-but-nullable (no default)
+
+
+class Crate(BaseModel):
+    box: Box | None  # PEP 604 nullable nested model, required-but-nullable
+    boxes: list[Box]
+
+
+def test_fill_missing_nullables_recurses_into_pep604_nested_model() -> None:
+    # `box` / `boxes[*]` are present dicts whose required-but-nullable `note` was
+    # omitted. The PEP 604 `Box | None` annotation must still unwrap so recursion
+    # reaches the nested model and fills note=None — regression: the union check
+    # matched only typing.Union, never types.UnionType, so `X | None` was skipped.
+    out = fill_missing_nullables({"box": {"label": "x"}, "boxes": [{"label": "y"}]}, Crate)
+    assert out["box"]["note"] is None
+    assert out["boxes"][0]["note"] is None
+    assert isinstance(Crate.model_validate(out), Crate)
+
+
+class ConstrainedCrate(BaseModel):
+    finding: Finding | None  # PEP 604 nullable nested model carrying value bounds
+
+
+def test_clamp_recurses_into_pep604_nested_model() -> None:
+    # Same union-resolution path gates clamp recursion into a `Finding | None`.
+    out = clamp_to_constraints({"finding": {"severity": 99, "note": "ok"}}, ConstrainedCrate)
+    assert out["finding"]["severity"] == 5
