@@ -21,6 +21,12 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ValidationError
 
 from .repair import repair_enums, salvage_list, salvage_lists
+from .runaway import (
+    MAX_TOKENS_FINISH_REASONS,
+    rehome_to_original,
+    runaway_prone_string_fields,
+    strip_runaway_strings,
+)
 from .schema import clamp_to_constraints, fill_missing_nullables, strip_nullable_anyof
 
 if TYPE_CHECKING:
@@ -32,7 +38,7 @@ if TYPE_CHECKING:
     # importing langchain at runtime.
     from .langchain import GeminiSafe as GeminiSafe
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "coax",
@@ -42,6 +48,10 @@ __all__ = [
     "repair_enums",
     "salvage_list",
     "salvage_lists",
+    "MAX_TOKENS_FINISH_REASONS",
+    "rehome_to_original",
+    "runaway_prone_string_fields",
+    "strip_runaway_strings",
     "__version__",
 ]
 

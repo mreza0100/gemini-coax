@@ -17,6 +17,7 @@ import logging
 from typing import TYPE_CHECKING, Any, Literal
 
 from .repair import salvage_lists
+from .runaway import MAX_TOKENS_FINISH_REASONS, rehome_to_original, strip_runaway_strings
 from .schema import clamp_to_constraints, fill_missing_nullables, strip_nullable_anyof
 
 try:
@@ -63,6 +64,88 @@ _TRANSIENT_TRANSPORT_EXC: tuple[type[BaseException], ...] = (ConnectionError, OS
 
 # Total attempts including the original call. 3 = 1 original + 2 retries.
 _TRANSIENT_RETRY_ATTEMPTS = 3
+
+
+# ── Structured-output coaxing + MAX_TOKENS runaway recovery helpers ─────────
+#
+# These are module-level (not methods) so they stay pure and testable. The
+# primary structured call always runs with include_raw=True internally so the
+# finish_reason is visible; _shape_output then honours the caller's public
+# include_raw choice.
+
+
+def _coax_dict(raw_dict: Any, model: type[BaseModel]) -> Any:
+    """clamp → fill → validate → salvage. Returns a model instance or raises."""
+    clamped = clamp_to_constraints(raw_dict, model)
+    clamped = fill_missing_nullables(clamped, model)
+    try:
+        return model.model_validate(clamped)
+    except ValidationError:
+        salvaged = salvage_lists(clamped, model)
+        if salvaged is not None:
+            return salvaged
+        raise
+
+
+def _coax_envelope_to_model(envelope: Any, model: type[BaseModel]) -> BaseModel | None:
+    """Pull the parsed dict out of an include_raw envelope and coax it to ``model``.
+
+    Returns ``None`` (rather than raising) when nothing usable could be produced,
+    so the recovery path can fall through to the primary result.
+    """
+    parsed = envelope.get("parsed") if isinstance(envelope, dict) else envelope
+    if isinstance(parsed, BaseModel):
+        return parsed
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        result = _coax_dict(parsed, model)
+    except ValidationError:
+        return None
+    return result if isinstance(result, BaseModel) else None
+
+
+def _finish_reason(envelope: Any) -> str | None:
+    raw_msg = envelope.get("raw") if isinstance(envelope, dict) else None
+    md = getattr(raw_msg, "response_metadata", {}) or {}
+    fr = md.get("finish_reason") or md.get("finishReason")
+    return str(fr).upper() if fr else None
+
+
+def _is_truncated(envelope: Any) -> bool:
+    return _finish_reason(envelope) in MAX_TOKENS_FINISH_REASONS
+
+
+def _shape_output(envelope: Any, parsed: Any, *, include_raw: bool) -> Any:
+    """Return the public shape: the bare parsed model, or the {raw,parsed,...} envelope."""
+    if not include_raw:
+        return parsed
+    if isinstance(envelope, dict):
+        out = dict(envelope)
+        out["parsed"] = parsed
+        if parsed is not None:
+            out["parsing_error"] = None
+        return out
+    return parsed
+
+
+def _run_sync(coro: Any) -> Any:
+    """Drive an async coroutine from the sync .invoke() path.
+
+    Mirrors langchain's own sync-over-async bridging: if no loop is running,
+    asyncio.run drives it; if one is already running, defer to a fresh loop in a
+    worker thread (the structured call is network-bound, so the thread hop is free).
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 class GeminiSafe(ChatGoogleGenerativeAI):
@@ -128,44 +211,41 @@ class GeminiSafe(ChatGoogleGenerativeAI):
 
         original_model = schema
         fixed_schema = strip_nullable_anyof(schema.model_json_schema())
-        base: Runnable = super().with_structured_output(  # type: ignore[type-arg]
-            fixed_schema, method=method, include_raw=include_raw, **kwargs
+
+        # The primary call always requests include_raw so the validator can read
+        # finish_reason and detect a MAX_TOKENS string runaway (see _recover). The
+        # public include_raw contract is honoured by re-wrapping the envelope below.
+        base_raw: Runnable = super().with_structured_output(  # type: ignore[type-arg]
+            fixed_schema, method=method, include_raw=True, **kwargs
         )
 
-        if not include_raw:
+        # Recovery twin — runaway-prone free-string fields stripped. Built once and
+        # only when the model actually HAS such a field; otherwise no retry is wired.
+        recovery_model, stripped = strip_runaway_strings(original_model)
+        recovery_raw: Runnable | None = None  # type: ignore[type-arg]
+        if stripped:
+            rec_schema = strip_nullable_anyof(recovery_model.model_json_schema())
+            recovery_raw = super().with_structured_output(
+                rec_schema, method=method, include_raw=True, **kwargs
+            )
 
-            def _validate(d: Any) -> Any:
-                if isinstance(d, dict):
-                    clamped = clamp_to_constraints(d, original_model)
-                    clamped = fill_missing_nullables(clamped, original_model)
-                    try:
-                        return original_model.model_validate(clamped)
-                    except ValidationError:
-                        salvaged = salvage_lists(clamped, original_model)
-                        if salvaged is not None:
-                            return salvaged
-                        raise
-                return d
+        async def _ainvoke(inputs: Any) -> Any:
+            result = await base_raw.ainvoke(inputs)
+            if recovery_raw is not None and _is_truncated(result):
+                _log.warning(
+                    "gemini_max_tokens_runaway_recovery finish_reason=%s stripped=%s",
+                    _finish_reason(result),
+                    stripped,
+                )
+                rec = await recovery_raw.ainvoke(inputs)
+                recovered = _coax_envelope_to_model(rec, recovery_model)
+                if recovered is not None:
+                    rehomed = rehome_to_original(recovered, original_model, stripped)
+                    return _shape_output(rec, rehomed, include_raw=include_raw)
+            parsed = _coax_envelope_to_model(result, original_model)
+            return _shape_output(result, parsed, include_raw=include_raw)
 
-            return base | RunnableLambda(_validate)
+        def _invoke(inputs: Any) -> Any:
+            return _run_sync(_ainvoke(inputs))
 
-        def _validate_raw(result: Any) -> Any:
-            if not isinstance(result, dict):
-                return result
-            parsed = result.get("parsed")
-            if isinstance(parsed, dict):
-                try:
-                    clamped = clamp_to_constraints(parsed, original_model)
-                    clamped = fill_missing_nullables(clamped, original_model)
-                    result["parsed"] = original_model.model_validate(clamped)
-                except Exception as exc:  # noqa: BLE001
-                    salvaged = salvage_lists(parsed, original_model)
-                    if salvaged is not None:
-                        result["parsed"] = salvaged
-                    else:
-                        result["parsing_error"] = exc
-                        result["parsed"] = None
-                        result["parsed_dict"] = parsed
-            return result
-
-        return base | RunnableLambda(_validate_raw)
+        return RunnableLambda(func=_invoke, afunc=_ainvoke)

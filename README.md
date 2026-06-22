@@ -22,6 +22,8 @@ If you've hit any of these, this library is for you:
 - A nullable `Literal[...] | None` field where Gemini invents values off-menu
 - `ge`/`le`/`max_length`/`max_items` constraints ignored, failing validation
 - Empty `{}` or truncated objects at the tail of a long list, killing the whole array
+- A free-text `str` field that loops the same phrase until `finish_reason=MAX_TOKENS`,
+  truncating the JSON mid-array so an N-item extraction collapses to one
 
 ## Install
 
@@ -91,10 +93,49 @@ schema = strip_nullable_anyof(Report.model_json_schema())   # send THIS to Gemin
 | Omits a now-optional nullable field | `fill_missing_nullables` injects `None` so re-validation passes |
 | Close-but-wrong enum at the array tail (`"defensiveness"` vs `"defensiveness-tone"`) | `repair_enums` fuzzy-matches it back (zero-cost `difflib`) |
 | Empty `{}` / truncated objects when the token budget runs out | `salvage_lists` validates entries individually, keeps the good ones |
+| Unbounded free-string field loops until `MAX_TOKENS`, truncating the array | `GeminiSafe` detects the truncation and re-issues **once** with the runaway-prone string fields stripped, then re-homes onto your model |
 | Transient transport fault before any HTTP status | `GeminiSafe` retries with exponential backoff + jitter |
 
 A full-chain retry is 100–300× more expensive than these repairs — and often
-makes things worse. Repair beats re-roll.
+makes things worse. Repair beats re-roll. The one case that *does* warrant a
+second call is the `MAX_TOKENS` string runaway below: the array never finished
+generating, so there is nothing to repair — only to regenerate without the field
+the decoder looped on.
+
+## The `MAX_TOKENS` string runaway
+
+Gemini's constrained decoder, while generating an **unbounded free-string field**
+(a `str` with no enum/`Literal` and a `maxLength` it ignores), can fall into a
+degenerate repetition loop — emitting the same phrase thousands of times until it
+exhausts `max_output_tokens` and returns `finish_reason == "MAX_TOKENS"`. The JSON
+is then truncated mid-array: every list entry after the runaway is lost, and
+`salvage_lists` can only recover the one or two entries that completed *before* it.
+A 16-row extraction silently returns 1 row.
+
+`salvage_lists` cannot fix this — the rows were never emitted. `GeminiSafe` handles
+it at the call seam:
+
+1. **Detect** — `finish_reason == "MAX_TOKENS"` means the output is truncated and
+   untrustworthy.
+2. **Recover** — re-issue the same prompt **once** with the runaway-prone string
+   fields stripped from the response schema. With no unbounded string to loop on,
+   the decoder completes the array normally.
+3. **Re-home** — validate the recovered rows back onto your original model. Stripped
+   fields fill from their default, then `None` if nullable, then `""` for a required
+   string (the value the runaway destroyed anyway).
+
+This only arms when your model actually has a runaway-prone string field, and only
+fires on an observed `MAX_TOKENS` truncation — clean calls cost exactly one request,
+as before. Compose the pieces directly with the raw SDK:
+
+```python
+from gemini_coax import (
+    runaway_prone_string_fields,  # which str fields can loop (no enum/pattern/tight max_length)
+    strip_runaway_strings,        # build a recovery twin model with those fields removed
+    rehome_to_original,           # validate recovered rows back onto your strict model
+    MAX_TOKENS_FINISH_REASONS,    # {"MAX_TOKENS", "LENGTH", ...}
+)
+```
 
 ## Design
 
