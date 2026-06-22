@@ -1,6 +1,6 @@
 [project]
 name = "gemini-coax"
-version = "0.2.0"
+version = "0.2.1"
 description = "Make Google Gemini structured output actually validate against your Pydantic models — fixes the anyOf/enum drop, ignored numeric & length bounds, degraded array tails, and MAX_TOKENS string-runaway collapse."
 readme = "README.md"
 requires-python = ">=3.10"

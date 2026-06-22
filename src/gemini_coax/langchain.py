@@ -90,8 +90,11 @@ def _coax_dict(raw_dict: Any, model: type[BaseModel]) -> Any:
 def _coax_envelope_to_model(envelope: Any, model: type[BaseModel]) -> BaseModel | None:
     """Pull the parsed dict out of an include_raw envelope and coax it to ``model``.
 
-    Returns ``None`` (rather than raising) when nothing usable could be produced,
-    so the recovery path can fall through to the primary result.
+    LENIENT variant — returns ``None`` (rather than raising) when nothing usable
+    could be produced. Reserved for the recovery attempt only, so a failed recovery
+    falls through to the strict primary result. The primary result must NEVER use
+    this: a total parse failure has to surface (raise / error-envelope), not vanish
+    into ``None`` — see :func:`_shape_primary`.
     """
     parsed = envelope.get("parsed") if isinstance(envelope, dict) else envelope
     if isinstance(parsed, BaseModel):
@@ -103,6 +106,43 @@ def _coax_envelope_to_model(envelope: Any, model: type[BaseModel]) -> BaseModel 
     except ValidationError:
         return None
     return result if isinstance(result, BaseModel) else None
+
+
+def _shape_primary(envelope: Any, model: type[BaseModel], *, include_raw: bool) -> Any:
+    """STRICT primary shaper — coax the envelope's parsed dict, surfacing total failure.
+
+    Unlike the lenient :func:`_coax_envelope_to_model`, this enforces the v0.1.1
+    total-parse-failure contract on the PRIMARY result:
+
+    * ``include_raw=False`` — on total failure (clamp→fill→validate→salvage all
+      fail) the underlying :class:`ValidationError` propagates. A fully-malformed
+      LLM output fails loud, never silently becomes ``None``.
+    * ``include_raw=True`` — on total failure return the error envelope:
+      ``parsed=None``, ``parsing_error=<the ValidationError>``,
+      ``parsed_dict=<the clamped dict that failed>``. On success, ``parsed`` is the
+      validated model and ``parsing_error`` is ``None`` (set by :func:`_shape_output`).
+
+    An already-validated model (recovery rehome, or a parsed BaseModel) and a
+    non-dict parsed value pass straight through to :func:`_shape_output`.
+    """
+    parsed = envelope.get("parsed") if isinstance(envelope, dict) else envelope
+    if not isinstance(parsed, dict):
+        return _shape_output(envelope, parsed, include_raw=include_raw)
+    clamped = clamp_to_constraints(parsed, model)
+    clamped = fill_missing_nullables(clamped, model)
+    try:
+        coaxed = _coax_dict(parsed, model)
+    except ValidationError as exc:
+        if not include_raw:
+            raise
+        if isinstance(envelope, dict):
+            out = dict(envelope)
+            out["parsed"] = None
+            out["parsing_error"] = exc
+            out["parsed_dict"] = clamped
+            return out
+        return None
+    return _shape_output(envelope, coaxed, include_raw=include_raw)
 
 
 def _finish_reason(envelope: Any) -> str | None:
@@ -242,8 +282,7 @@ class GeminiSafe(ChatGoogleGenerativeAI):
                 if recovered is not None:
                     rehomed = rehome_to_original(recovered, original_model, stripped)
                     return _shape_output(rec, rehomed, include_raw=include_raw)
-            parsed = _coax_envelope_to_model(result, original_model)
-            return _shape_output(result, parsed, include_raw=include_raw)
+            return _shape_primary(result, original_model, include_raw=include_raw)
 
         def _invoke(inputs: Any) -> Any:
             return _run_sync(_ainvoke(inputs))

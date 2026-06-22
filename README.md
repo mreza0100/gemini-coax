@@ -147,6 +147,13 @@ Two layers, so the value isn't hostage to any framework's release notes:
 - **Adapter** (`gemini_coax.langchain.GeminiSafe`) — the LangChain drop-in.
   Pulled in only by the `[langchain]` extra; pins `langchain-google-genai>=4.2,<5`.
 
+## Changelog
+
+- **0.2.1** — fix: restore raise/error-envelope on total parse failure (regression
+  from 0.2.0's runaway refactor); add `GeminiSafe.with_structured_output`
+  total-failure coverage.
+- **0.2.0** — `MAX_TOKENS` string-runaway detection + one-shot recovery.
+
 ## Releasing
 
 Releases publish to PyPI **automatically** via
