@@ -27,7 +27,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev,langchain]"
           ruff check src tests
           pytest -q
 
