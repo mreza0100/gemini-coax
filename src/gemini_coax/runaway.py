@@ -67,12 +67,20 @@ def runaway_prone_string_fields(model: type[BaseModel]) -> list[str]:
 
     A field qualifies when its optional-unwrapped type is a bare ``str`` with no
     enum/``Literal``, no ``pattern``, and no tight ``max_length`` — the only shape
-    a constrained decoder can loop on indefinitely.
+    a constrained decoder can loop on indefinitely — AND it is OPTIONAL. A
+    REQUIRED string is never stripped: the recovery placeholder ("") would fail
+    the original model's required/min_length constraint, raising on rehome and
+    collapsing the whole record to nothing (the count=0 failure class). Only
+    optional free-text (e.g. a nullable ``summary``) is safe to drop on recovery.
     """
     out: list[str] = []
     for name, field_info in model.model_fields.items():
         inner = _unwrap_optional(field_info.annotation)
-        if inner is str and not _is_constrained_string(field_info, inner):
+        if (
+            inner is str
+            and not _is_constrained_string(field_info, inner)
+            and not field_info.is_required()
+        ):
             out.append(name)
     return out
 
